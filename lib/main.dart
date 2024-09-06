@@ -4,96 +4,263 @@ import 'package:intl/intl.dart';
 import 'package:share/share.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_speed_dial/flutter_speed_dial.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 
 void main() {
-  runApp(MyApp());
+  runApp(ProviderScope(child: MyApp()));
 }
 
-class MyApp extends StatefulWidget {
-  @override
-  _MyAppState createState() => _MyAppState();
-}
+// State management with Riverpod
+final themeProvider = StateNotifierProvider<ThemeNotifier, ThemeMode>((ref) => ThemeNotifier());
+final notificationsProvider = StateNotifierProvider<NotificationsNotifier, bool>((ref) => NotificationsNotifier());
+final shoppingListsProvider = StateNotifierProvider<ShoppingListsNotifier, List<ShoppingList>>((ref) => ShoppingListsNotifier());
 
-class _MyAppState extends State<MyApp> {
-  @override
-  void initState() {
-    super.initState();
-    _loadPreferences();
-    _initializeNotifications();
-  }
+class ThemeNotifier extends StateNotifier<ThemeMode> {
+  ThemeNotifier() : super(ThemeMode.light);
 
-  ThemeMode _themeMode = ThemeMode.light;
-  bool _notificationsEnabled = true;
-
-  void _toggleTheme() {
-    setState(() {
-      _themeMode =
-          _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
-    });
+  void toggleTheme() {
+    state = state == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
     _savePreferences();
-  }
-
-  void _toggleNotifications() {
-    setState(() {
-      _notificationsEnabled = !_notificationsEnabled;
-    });
-    _savePreferences();
-  }
-
-  Future<void> _loadPreferences() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _themeMode = (prefs.getString('themeMode') ?? 'light') == 'dark'
-          ? ThemeMode.dark
-          : ThemeMode.light;
-      _notificationsEnabled = prefs.getBool('notificationsEnabled') ?? true;
-    });
   }
 
   Future<void> _savePreferences() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-        'themeMode', _themeMode == ThemeMode.dark ? 'dark' : 'light');
-    await prefs.setBool('notificationsEnabled', _notificationsEnabled);
+    await prefs.setString('themeMode', state == ThemeMode.dark ? 'dark' : 'light');
   }
 
-  void _initializeNotifications() async {
-    if (_notificationsEnabled) {
-      const AndroidInitializationSettings initializationSettingsAndroid =
-          AndroidInitializationSettings('@mipmap/ic_launcher');
-      final InitializationSettings initializationSettings =
-          InitializationSettings(android: initializationSettingsAndroid);
-      await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+  Future<void> loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    final themeMode = prefs.getString('themeMode');
+    if (themeMode != null) {
+      state = themeMode == 'dark' ? ThemeMode.dark : ThemeMode.light;
     }
   }
+}
 
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
+class NotificationsNotifier extends StateNotifier<bool> {
+  NotificationsNotifier() : super(true);
 
+  void toggleNotifications() {
+    state = !state;
+    _savePreferences();
+  }
+
+  Future<void> _savePreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('notificationsEnabled', state);
+  }
+
+  Future<void> loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    state = prefs.getBool('notificationsEnabled') ?? true;
+  }
+}
+
+class ShoppingList {
+  final String id;
+  final String title;
+  final List<ShoppingItem> items;
+  final String timestamp;
+
+  ShoppingList({required this.id, required this.title, required this.items, required this.timestamp});
+
+  factory ShoppingList.fromJson(Map<String, dynamic> json) {
+    return ShoppingList(
+      id: json['id'],
+      title: json['title'],
+      items: (json['items'] as List).map((item) => ShoppingItem.fromJson(item)).toList(),
+      timestamp: json['timestamp'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'items': items.map((item) => item.toJson()).toList(),
+      'timestamp': timestamp,
+    };
+  }
+}
+
+class ShoppingItem {
+  final String id;
+  final String title;
+  final String category;
+  final String details;
+  final String notes;
+  bool done;
+  final String timestamp;
+
+  ShoppingItem({
+    required this.id,
+    required this.title,
+    required this.category,
+    required this.details,
+    required this.notes,
+    required this.done,
+    required this.timestamp,
+  });
+
+  factory ShoppingItem.fromJson(Map<String, dynamic> json) {
+    return ShoppingItem(
+      id: json['id'],
+      title: json['title'],
+      category: json['category'],
+      details: json['details'],
+      notes: json['notes'],
+      done: json['done'],
+      timestamp: json['timestamp'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'category': category,
+      'details': details,
+      'notes': notes,
+      'done': done,
+      'timestamp': timestamp,
+    };
+  }
+}
+
+class ShoppingListsNotifier extends StateNotifier<List<ShoppingList>> {
+  ShoppingListsNotifier() : super([]);
+
+  void addList(String title) {
+    final newList = ShoppingList(
+      id: Uuid().v4(),
+      title: title,
+      items: [],
+      timestamp: DateFormat('yyyy-MM-dd').format(DateTime.now()),
+    );
+    state = [...state, newList];
+    _saveShoppingLists();
+  }
+
+  void deleteList(String id) {
+    state = state.where((list) => list.id != id).toList();
+    _saveShoppingLists();
+  }
+
+  void addItem(String listId, String title, String category, String details, String notes) {
+    state = state.map((list) {
+      if (list.id == listId) {
+        final newItem = ShoppingItem(
+          id: Uuid().v4(),
+          title: title,
+          category: category,
+          details: details,
+          notes: notes,
+          done: false,
+          timestamp: DateFormat('yyyy-MM-dd – kk:mm').format(DateTime.now()),
+        );
+        return ShoppingList(
+          id: list.id,
+          title: list.title,
+          items: [...list.items, newItem],
+          timestamp: list.timestamp,
+        );
+      }
+      return list;
+    }).toList();
+    _saveShoppingLists();
+  }
+
+  void toggleItemDone(String listId, String itemId) {
+    state = state.map((list) {
+      if (list.id == listId) {
+        final updatedItems = list.items.map((item) {
+          if (item.id == itemId) {
+            return ShoppingItem(
+              id: item.id,
+              title: item.title,
+              category: item.category,
+              details: item.details,
+              notes: item.notes,
+              done: !item.done,
+              timestamp: item.timestamp,
+            );
+          }
+          return item;
+        }).toList();
+        return ShoppingList(
+          id: list.id,
+          title: list.title,
+          items: updatedItems,
+          timestamp: list.timestamp,
+        );
+      }
+      return list;
+    }).toList();
+    _saveShoppingLists();
+  }
+
+  void deleteItem(String listId, String itemId) {
+    state = state.map((list) {
+      if (list.id == listId) {
+        final updatedItems = list.items.where((item) => item.id != itemId).toList();
+        return ShoppingList(
+          id: list.id,
+          title: list.title,
+          items: updatedItems,
+          timestamp: list.timestamp,
+        );
+      }
+      return list;
+    }).toList();
+    _saveShoppingLists();
+  }
+
+  Future<void> _saveShoppingLists() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String jsonString = jsonEncode(state.map((list) => list.toJson()).toList());
+    await prefs.setString('shoppingLists', jsonString);
+  }
+
+  Future<void> loadShoppingLists() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? jsonString = prefs.getString('shoppingLists');
+    if (jsonString != null) {
+      final List<dynamic> jsonList = jsonDecode(jsonString);
+      state = jsonList.map((item) => ShoppingList.fromJson(item)).toList();
+    }
+  }
+}
+
+class MyApp extends ConsumerWidget {
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeMode = ref.watch(themeProvider);
+    
     return MaterialApp(
       title: 'Shopping List',
-      themeMode: _themeMode,
+      themeMode: themeMode,
       theme: ThemeData(
         brightness: Brightness.light,
         primarySwatch: Colors.blue,
         textTheme: TextTheme(
-          titleLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          bodyLarge: TextStyle(fontSize: 16),
-          bodyMedium: TextStyle(fontSize: 14, color: Colors.grey[600]),
+          titleLarge: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          bodyLarge: TextStyle(fontSize: 18),
+          bodyMedium: TextStyle(fontSize: 16, color: Colors.grey[600]),
         ),
         dialogTheme: DialogTheme(
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12.0),
+            borderRadius: BorderRadius.circular(16.0),
           ),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.blue,
+            foregroundColor: Colors.white, backgroundColor: Colors.blue,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12.0),
             ),
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
         ),
       ),
@@ -101,106 +268,62 @@ class _MyAppState extends State<MyApp> {
         brightness: Brightness.dark,
         primarySwatch: Colors.blue,
         textTheme: TextTheme(
-          titleLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          bodyLarge: TextStyle(fontSize: 16),
-          bodyMedium: TextStyle(fontSize: 14, color: Colors.grey[400]),
+          titleLarge: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          bodyLarge: TextStyle(fontSize: 18),
+          bodyMedium: TextStyle(fontSize: 16, color: Colors.grey[400]),
         ),
         dialogTheme: DialogTheme(
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12.0),
+            borderRadius: BorderRadius.circular(16.0),
           ),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.blue,
+            foregroundColor: Colors.white, backgroundColor: Colors.blue,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12.0),
             ),
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
         ),
       ),
-      home: MyHomePage(
-        onToggleTheme: _toggleTheme,
-        notificationsEnabled: _notificationsEnabled,
-        onToggleNotifications: _toggleNotifications,
-        currentThemeMode: _themeMode,
-      ),
+      home: MyHomePage(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({
-    super.key,
-    required this.onToggleTheme,
-    required this.notificationsEnabled,
-    required this.onToggleNotifications,
-    required this.currentThemeMode,
-  });
-
-  final VoidCallback onToggleTheme;
-  final bool notificationsEnabled;
-  final VoidCallback onToggleNotifications;
-  final ThemeMode currentThemeMode;
-
+class MyHomePage extends ConsumerStatefulWidget {
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  _MyHomePageState createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  final List<Map<String, dynamic>> _shoppingLists = [];
-  final TextEditingController _searchController = TextEditingController();
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
+class _MyHomePageState extends ConsumerState<MyHomePage> with TickerProviderStateMixin {
+  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
   DateTime? _selectedDate;
-  String _searchQuery = '';
-  int? _dialogIndex; // Track which list's dialog is open
-
-  Future<void> _loadShoppingLists() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String? jsonString = prefs.getString('shoppingLists');
-    if (jsonString != null) {
-      final List<dynamic> jsonList = jsonDecode(jsonString);
-      setState(() {
-        _shoppingLists.clear();
-        _shoppingLists.addAll(
-            jsonList.map((item) => Map<String, dynamic>.from(item)).toList());
-      });
-    }
-  }
-
-  Future<void> _saveShoppingLists() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String jsonString = jsonEncode(_shoppingLists);
-    await prefs.setString('shoppingLists', jsonString);
-  }
+  int _currentIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _initializeNotifications();
-    _searchController.addListener(() {
-      setState(() {
-        _searchQuery = _searchController.text;
-      });
-    });
-    _loadShoppingLists();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    await ref.read(themeProvider.notifier).loadPreferences();
+    await ref.read(notificationsProvider.notifier).loadPreferences();
+    await ref.read(shoppingListsProvider.notifier).loadShoppingLists();
   }
 
   void _initializeNotifications() async {
-    if (widget.notificationsEnabled) {
-      const AndroidInitializationSettings initializationSettingsAndroid =
-          AndroidInitializationSettings('@mipmap/ic_launcher');
-      final InitializationSettings initializationSettings =
-          InitializationSettings(android: initializationSettingsAndroid);
-      await flutterLocalNotificationsPlugin.initialize(initializationSettings);
-    }
+    const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
+    final InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
+    await flutterLocalNotificationsPlugin.initialize(initializationSettings);
   }
 
   Future<void> _showNotification(int id, String title, String body) async {
-    if (widget.notificationsEnabled) {
-      const AndroidNotificationDetails androidPlatformChannelSpecifics =
-          AndroidNotificationDetails(
+    if (ref.read(notificationsProvider)) {
+      const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
         'your_channel_id',
         'your_channel_name',
         channelDescription: 'your_channel_description',
@@ -208,77 +331,19 @@ class _MyHomePageState extends State<MyHomePage> {
         priority: Priority.high,
         showWhen: false,
       );
-      const NotificationDetails platformChannelSpecifics =
-          NotificationDetails(android: androidPlatformChannelSpecifics);
-      await flutterLocalNotificationsPlugin.show(
-        id,
-        title,
-        body,
-        platformChannelSpecifics,
-      );
+      const NotificationDetails platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
+      await flutterLocalNotificationsPlugin.show(id, title, body, platformChannelSpecifics);
     }
   }
 
-  void _addShoppingList(String title) {
-    if (title.isNotEmpty) {
-      setState(() {
-        _shoppingLists.add({
-          'title': title,
-          'items': [],
-          'timestamp': DateFormat('yyyy-MM-dd').format(DateTime.now()),
-        });
-      });
-      _saveShoppingLists();
-      _showNotification(
-          _shoppingLists.length, 'New shopping list added', 'List: $title');
-    }
-  }
-
-  void _addItemToList(int listIndex, String title, String category,
-      String details, String notes) {
-    if (title.isNotEmpty) {
-      setState(() {
-        _shoppingLists[listIndex]['items'].add({
-          'title': title,
-          'category': category,
-          'details': details,
-          'notes': notes,
-          'done': false,
-          'timestamp': DateFormat('yyyy-MM-dd – kk:mm').format(DateTime.now()),
-        });
-      });
-      _saveShoppingLists();
-      _showNotification(_shoppingLists[listIndex]['items'].length,
-          'New item added', 'Item: $title');
-    }
-  }
-
-  void _toggleItemDone(int listIndex, int itemIndex) {
-    setState(() {
-      _shoppingLists[listIndex]['items'][itemIndex]['done'] =
-          !_shoppingLists[listIndex]['items'][itemIndex]['done'];
-    });
-    _saveShoppingLists();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Navigator.of(context).pop();
-      _showShoppingListDialog(listIndex);
-    });
-  }
-
-  void _shareList(int listIndex) {
-    final list = _shoppingLists[listIndex];
-    final List<String> doneItems = list['items']
-        .where((item) => item['done'] == true)
-        .map<String>((item) => item['title'] as String)
-        .toList();
-    final List<String> notDoneItems = list['items']
-        .where((item) => item['done'] == false)
-        .map<String>((item) => item['title'] as String)
-        .toList();
-
+  void _shareList(ShoppingList list) {
     final StringBuffer shareContent = StringBuffer();
-    shareContent.writeln('Shopping List: ${list['title']}');
-    shareContent.writeln('Date: ${list['timestamp']}');
+    shareContent.writeln('Shopping List: ${list.title}');
+    shareContent.writeln('Date: ${list.timestamp}');
+    
+    final doneItems = list.items.where((item) => item.done).map((item) => item.title).toList();
+    final notDoneItems = list.items.where((item) => !item.done).map((item) => item.title).toList();
+
     if (doneItems.isNotEmpty) {
       shareContent.writeln('\nDone:');
       for (final item in doneItems) {
@@ -295,28 +360,7 @@ class _MyHomePageState extends State<MyHomePage> {
     Share.share(shareContent.toString());
   }
 
-  void _deleteShoppingList(int index) {
-    setState(() {
-      _shoppingLists.removeAt(index);
-    });
-    _saveShoppingLists();
-  }
-
-  void _deleteItemFromList(int listIndex, int itemIndex) {
-    setState(() {
-      _shoppingLists[listIndex]['items'].removeAt(itemIndex);
-    });
-    _saveShoppingLists();
-  }
-
-  void _reopenListDialog(int listIndex) {
-    _dialogIndex = listIndex;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showShoppingListDialog(listIndex);
-    });
-  }
-
-  void _confirmDeleteList(int listIndex) {
+  void _confirmDeleteList(String listId) {
     showDialog(
       context: context,
       builder: (context) {
@@ -326,10 +370,7 @@ class _MyHomePageState extends State<MyHomePage> {
           actions: [
             TextButton(
               onPressed: () {
-                setState(() {
-                  _shoppingLists.removeAt(listIndex);
-                });
-                _saveShoppingLists();
+                ref.read(shoppingListsProvider.notifier).deleteList(listId);
                 Navigator.of(context).pop();
               },
               child: Text('Yes'),
@@ -344,28 +385,100 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  void _confirmDeleteItem(BuildContext context, int listIndex, int itemIndex,
-      StateSetter setState) {
+  void _showShoppingListDialog(ShoppingList list) {
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text('Confirm Deletion'),
-          content: Text('Are you sure you want to delete this item?'),
+          title: Text(
+            list.title,
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          content: Container(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: list.items.length,
+              itemBuilder: (context, index) {
+                final item = list.items[index];
+                return Dismissible(
+                  key: Key(item.id),
+                  onDismissed: (direction) {
+                    ref.read(shoppingListsProvider.notifier).deleteItem(list.id, item.id);
+                  },
+                  background: Container(
+                    color: Colors.red,
+                    child: Center(
+                      child: Text(
+                        'Delete',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ),
+                  child: Card(
+                    child: ExpansionTile(
+                      leading: Icon(_getCategoryIcon(item.category)),
+                      title: Text(
+                        item.title,
+                        style: TextStyle(
+                          decoration: item.done ? TextDecoration.lineThrough : null,
+                        ),
+                      ),
+                      subtitle: Text(item.category),
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Details: ${item.details}'),
+                              Text('Notes: ${item.notes}'),
+                              Text('Added: ${item.timestamp}'),
+                            ],
+                          ),
+                        ),
+                      ],
+                      trailing: Checkbox(
+                        value: item.done,
+                        onChanged: (bool? value) {
+                          ref.read(shoppingListsProvider.notifier).toggleItemDone(list.id, item.id);
+                        },
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
           actions: <Widget>[
             TextButton(
-              child: Text('Cancel'),
+              child: Text('Add Item'),
+              onPressed: () async {
+                final newItem = await _showAddItemDialog();
+                if (newItem != null) {
+                  ref.read(shoppingListsProvider.notifier).addItem(
+                    list.id,
+                    newItem['title']!,
+                    newItem['category']!,
+                    newItem['details']!,
+                    newItem['notes']!,
+                  );
+                  Navigator.of(context).pop();
+                  _showShoppingListDialog(list);
+                }
+              },
+            ),
+            TextButton(
+              child: Text('Share'),
               onPressed: () {
+                _shareList(list);
                 Navigator.of(context).pop();
               },
             ),
             TextButton(
-              child: Text('Delete'),
+              child: Text('Close'),
               onPressed: () {
                 Navigator.of(context).pop();
-                setState(() {
-                  _deleteItemFromList(listIndex, itemIndex);
-                });
               },
             ),
           ],
@@ -374,131 +487,281 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  void _showShoppingListDialog(int listIndex) {
-    _dialogIndex = listIndex;
-    final list = _shoppingLists[listIndex];
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setState) {
-            return WillPopScope(
-              onWillPop: () async {
-                _dialogIndex = null;
-                return true;
-              },
-              child: AlertDialog(
-                title: Text(
-                  list['title'],
-                  style: Theme.of(context).textTheme.titleLarge,
+  IconData _getCategoryIcon(String category) {
+    switch (category.toLowerCase()) {
+      case 'food':
+        return Icons.fastfood;
+      case 'drinks':
+        return Icons.local_drink;
+      case 'household':
+        return Icons.home;
+      case 'personal care':
+        return Icons.face;
+      default:
+        return Icons.shopping_basket;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shoppingLists = ref.watch(shoppingListsProvider);
+    final filteredLists = _selectedDate == null
+        ? shoppingLists
+        : shoppingLists.where((list) {
+            final listDate = DateTime.parse(list.timestamp);
+            return listDate.year == _selectedDate?.year &&
+                listDate.month == _selectedDate?.month &&
+                listDate.day == _selectedDate?.day;
+          }).toList();
+
+    return Scaffold(
+      appBar: AppBar(
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Colors.blue, Colors.purple],
+            ),
+          ),
+        ),
+        title: Text(
+          'Shopping Lists',
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: Colors.white,
+              ),
+        ),
+        actions: <Widget>[
+          IconButton(
+            icon: Icon(ref.watch(themeProvider) == ThemeMode.dark ? Icons.wb_sunny : Icons.nights_stay),
+            onPressed: () => ref.read(themeProvider.notifier).toggleTheme(),
+          ),
+          IconButton(
+            icon: Icon(ref.watch(notificationsProvider) ? Icons.notifications : Icons.notifications_off),
+            onPressed: () => ref.read(notificationsProvider.notifier).toggleNotifications(),
+          ),
+          IconButton(
+            icon: Icon(Icons.calendar_today),
+            onPressed: () async {
+              final DateTime? picked = await showDatePicker(
+                context: context,
+                initialDate: _selectedDate ?? DateTime.now(),
+                firstDate: DateTime(2000),
+                lastDate: DateTime(2101),
+              );
+              if (picked != null && picked != _selectedDate) {
+                setState(() {
+                  _selectedDate = picked;
+                });
+              }
+            },
+          ),
+        ],
+      ),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          _buildShoppingListView(filteredLists),
+          _buildSettingsView(),
+        ],
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        items: [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.list),
+            label: 'Lists',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings),
+            label: 'Settings',
+          ),
+        ],
+      ),
+      floatingActionButton: _buildSpeedDial(),
+    );
+  }
+
+  Widget _buildShoppingListView(List<ShoppingList> lists) {
+    return lists.isEmpty
+        ? Center(
+            child: Text(
+              "You don't have any shopping list yet, create one by clicking + icon below",
+              style: Theme.of(context).textTheme.bodyLarge,
+              textAlign: TextAlign.center,
+            ),
+          )
+        : ListView.builder(
+            itemCount: lists.length,
+            itemBuilder: (context, index) {
+              final list = lists[index];
+              return AnimatedBuilder(
+                animation: AnimationController(
+                  duration: Duration(milliseconds: 300),
+                  vsync: this,
                 ),
-                content: SingleChildScrollView(
-                  child: Column(
-                    children: <Widget>[
-                      for (int i = 0; i < list['items'].length; i++)
-                        Dismissible(
-                          key: UniqueKey(),
-                          onDismissed: (direction) {
-                            setState(() {
-                              _deleteItemFromList(listIndex, i);
-                            });
-                          },
-                          child: ListTile(
-                            title: Text(
-                              list['items'][i]['title'],
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodyLarge
-                                  ?.copyWith(
-                                    decoration: list['items'][i]['done']
-                                        ? TextDecoration.lineThrough
-                                        : TextDecoration.none,
-                                  ),
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Details: ${list['items'][i]['details']}',
-                                  style: Theme.of(context).textTheme.bodyMedium,
-                                ),
-                                Text(
-                                  'Notes: ${list['items'][i]['notes']}',
-                                  style: Theme.of(context).textTheme.bodyMedium,
-                                ),
-                                Text(
-                                  list['items'][i]['timestamp'],
-                                  style: Theme.of(context).textTheme.bodyMedium,
-                                ),
-                              ],
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: Icon(Icons.delete, color: Colors.red),
-                                  onPressed: () {
-                                    _confirmDeleteItem(
-                                        context, listIndex, i, setState);
-                                  },
-                                ),
-                                IconButton(
-                                  icon: Icon(
-                                    list['items'][i]['done']
-                                        ? Icons.check_box
-                                        : Icons.check_box_outline_blank,
-                                    color: list['items'][i]['done']
-                                        ? Colors.green
-                                        : Colors.grey,
-                                  ),
-                                  onPressed: () {
-                                    setState(() {
-                                      _toggleItemDone(listIndex, i);
-                                    });
-                                  },
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                    ],
+                builder: (context, child) {
+                  return SlideTransition(
+                    position: Tween<Offset>(
+                      begin: Offset(-1, 0),
+                      end: Offset.zero,
+                    ).animate(CurvedAnimation(
+                      parent: AnimationController(
+                        duration: Duration(milliseconds: 300),
+                        vsync: this,
+                      )..forward(),
+                      curve: Curves.easeOut,
+                    )),
+                    child: child,
+                  );
+                },
+                child: Dismissible(
+                  key: Key(list.id),
+                  onDismissed: (direction) {
+                    ref.read(shoppingListsProvider.notifier).deleteList(list.id);
+                  },
+                  background: Container(
+                    color: Colors.red,
+                    child: Center(
+                      child: Text(
+                        'Delete',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ),
+                  child: Card(
+                    elevation: 2,
+                    margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        child: Text(list.title[0].toUpperCase()),
+                      ),
+                      title: Text(
+                        list.title,
+                        style: Theme.of(context).textTheme.bodyLarge,
+                      ),
+                      subtitle: Text(
+                        list.timestamp,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      trailing: IconButton(
+                        icon: Icon(Icons.delete),
+                        onPressed: () {
+                          _confirmDeleteList(list.id);
+                        },
+                      ),
+                      onTap: () {
+                        _showShoppingListDialog(list);
+                      },
+                    ),
                   ),
                 ),
-                actions: <Widget>[
-                  TextButton(
-                    child: Text('Add Item'),
-                    onPressed: () async {
-                      final newItem = await _showAddItemDialog();
-                      if (newItem != null) {
-                        Navigator.of(context).pop(); // Close the current dialog
-                        _addItemToList(
-                            listIndex,
-                            newItem['title']!,
-                            newItem['category']!,
-                            newItem['details']!,
-                            newItem['notes']!);
-                        _showShoppingListDialog(listIndex); // Reopen the dialog
-                      }
-                    },
-                  ),
-                  TextButton(
-                    child: Text('Share'),
-                    onPressed: () {
-                      _shareList(listIndex);
-                      Navigator.of(context).pop();
-                    },
-                  ),
-                  TextButton(
-                    child: Text('Close'),
-                    onPressed: () {
-                      _dialogIndex = null;
-                      Navigator.of(context).pop();
-                    },
-                  ),
-                ],
+              );
+            },
+          );
+  }
+
+  Widget _buildSettingsView() {
+    return ListView(
+      children: [
+        ListTile(
+          title: Text('Dark Mode'),
+          trailing: Switch(
+            value: ref.watch(themeProvider) == ThemeMode.dark,
+            onChanged: (value) {
+              ref.read(themeProvider.notifier).toggleTheme();
+            },
+          ),
+        ),
+        ListTile(
+          title: Text('Notifications'),
+          trailing: Switch(
+            value: ref.watch(notificationsProvider),
+            onChanged: (value) {
+              ref.read(notificationsProvider.notifier).toggleNotifications();
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSpeedDial() {
+    return SpeedDial(
+      animatedIcon: AnimatedIcons.menu_close,
+      animatedIconTheme: IconThemeData(size: 22.0),
+      backgroundColor: Colors.blue,
+      visible: true,
+      curve: Curves.bounceIn,
+      children: [
+        SpeedDialChild(
+          child: Icon(Icons.add),
+          backgroundColor: Colors.blue,
+          onTap: () async {
+            final title = await _showAddListDialog();
+            if (title != null) {
+              ref.read(shoppingListsProvider.notifier).addList(title);
+            }
+          },
+          label: 'Add List',
+          labelStyle: TextStyle(fontWeight: FontWeight.w500),
+          labelBackgroundColor: Colors.blue,
+        ),
+        SpeedDialChild(
+          child: Icon(Icons.search),
+          backgroundColor: Colors.blue,
+          onTap: () {
+            showSearch(
+              context: context,
+              delegate: CustomSearchDelegate(
+                shoppingLists: ref.read(shoppingListsProvider),
+                onListTap: _showShoppingListDialog,
               ),
             );
           },
+          label: 'Search',
+          labelStyle: TextStyle(fontWeight: FontWeight.w500),
+          labelBackgroundColor: Colors.blue,
+        ),
+      ],
+    );
+  }
+
+  Future<String?> _showAddListDialog() async {
+    String title = '';
+
+    return showDialog<String>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Add Shopping List'),
+          content: TextField(
+            decoration: InputDecoration(
+              labelText: 'Title',
+            ),
+            onChanged: (value) {
+              title = value;
+            },
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: Text('Cancel'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+            TextButton(
+              child: Text('Add'),
+              onPressed: () {
+                Navigator.of(context).pop(title);
+              },
+            ),
+          ],
         );
       },
     );
@@ -575,172 +838,11 @@ class _MyHomePageState extends State<MyHomePage> {
       },
     );
   }
-
-  @override
-  Widget build(BuildContext context) {
-    final filteredLists = _selectedDate == null
-        ? _shoppingLists
-        : _shoppingLists.where((list) {
-            final listDate = DateTime.parse(list['timestamp']);
-            return listDate.year == _selectedDate?.year &&
-                listDate.month == _selectedDate?.month &&
-                listDate.day == _selectedDate?.day;
-          }).toList();
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          'Shopping Lists',
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: Theme.of(context).brightness == Brightness.dark
-                    ? Colors.white
-                    : Colors.black,
-              ),
-        ),
-        actions: <Widget>[
-          IconButton(
-            icon: Icon(widget.currentThemeMode == ThemeMode.dark
-                ? Icons.wb_sunny
-                : Icons.nights_stay),
-            onPressed: widget.onToggleTheme,
-          ),
-          IconButton(
-            icon: Icon(widget.notificationsEnabled
-                ? Icons.notifications
-                : Icons.notifications_off),
-            onPressed: widget.onToggleNotifications,
-          ),
-          IconButton(
-            icon: Icon(Icons.calendar_today),
-            onPressed: () async {
-              final DateTime? picked = await showDatePicker(
-                context: context,
-                initialDate: _selectedDate ?? DateTime.now(),
-                firstDate: DateTime(2000),
-                lastDate: DateTime(2101),
-              );
-              if (picked != null && picked != _selectedDate) {
-                setState(() {
-                  _selectedDate = picked;
-                });
-              }
-            },
-          ),
-          IconButton(
-            icon: Icon(Icons.search),
-            onPressed: () {
-              showSearch(
-                context: context,
-                delegate: CustomSearchDelegate(
-                  shoppingLists: _shoppingLists,
-                  onListTap: _showShoppingListDialog,
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-      body: filteredLists.isEmpty
-          ? Center(
-              child: Text(
-                "You don't have any shopping list yet, create one by clicking + icon below",
-                style: Theme.of(context).textTheme.bodyLarge,
-                textAlign: TextAlign.center,
-              ),
-            )
-          : ListView.builder(
-              itemCount: filteredLists.length,
-              itemBuilder: (context, index) {
-                final list = filteredLists[index];
-                return Dismissible(
-                  key: UniqueKey(),
-                  onDismissed: (direction) {
-                    _deleteShoppingList(index);
-                  },
-                  background: Container(
-                    color: Colors.red,
-                    child: Center(
-                      child: Text(
-                        'Delete',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                    ),
-                  ),
-                  child: ListTile(
-                    title: Text(
-                      list['title'],
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                    subtitle: Text(
-                      list['timestamp'],
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    trailing: IconButton(
-                      icon: Icon(Icons.delete),
-                      onPressed: () {
-                        _confirmDeleteList(
-                            index); // Implement this method to show a confirmation dialog and delete the list
-                      },
-                    ),
-                    onTap: () {
-                      _showShoppingListDialog(index);
-                    },
-                  ),
-                );
-              },
-            ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final title = await _showAddListDialog();
-          if (title != null) {
-            _addShoppingList(title);
-          }
-        },
-        tooltip: 'Add Shopping List',
-        child: Icon(Icons.add),
-      ),
-    );
-  }
-
-  Future<String?> _showAddListDialog() async {
-    String title = '';
-
-    return showDialog<String>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('Add Shopping List'),
-          content: TextField(
-            decoration: InputDecoration(
-              labelText: 'Title',
-            ),
-            onChanged: (value) {
-              title = value;
-            },
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: Text('Cancel'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            ),
-            TextButton(
-              child: Text('Add'),
-              onPressed: () {
-                Navigator.of(context).pop(title);
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
 }
 
 class CustomSearchDelegate extends SearchDelegate {
-  final List<Map<String, dynamic>> shoppingLists;
-  final Function(int) onListTap;
+  final List<ShoppingList> shoppingLists;
+  final Function(ShoppingList) onListTap;
 
   CustomSearchDelegate({required this.shoppingLists, required this.onListTap});
 
@@ -769,59 +871,32 @@ class CustomSearchDelegate extends SearchDelegate {
   @override
   Widget buildResults(BuildContext context) {
     final results = shoppingLists
-        .where(
-            (list) => list['title'].toLowerCase().contains(query.toLowerCase()))
+        .where((list) => list.title.toLowerCase().contains(query.toLowerCase()))
         .toList();
 
-    if (results.isEmpty) {
-      return Center(
-        child: Text(
-          'No matching shopping lists found.',
-          style: Theme.of(context).textTheme.bodyLarge,
-        ),
-      );
-    }
-
-    return ListView.builder(
-      itemCount: results.length,
-      itemBuilder: (context, index) {
-        final list = results[index];
-        return ListTile(
-          title: Text(list['title']),
-          onTap: () {
-            onListTap(index);
-            close(context, null);
-          },
-        );
-      },
-    );
+    return _buildSearchResults(results);
   }
 
   @override
   Widget buildSuggestions(BuildContext context) {
     final suggestions = shoppingLists
-        .where(
-            (list) => list['title'].toLowerCase().contains(query.toLowerCase()))
+        .where((list) => list.title.toLowerCase().contains(query.toLowerCase()))
         .toList();
 
-    if (suggestions.isEmpty) {
-      return Center(
-        child: Text(
-          'No matching shopping lists found.',
-          style: Theme.of(context).textTheme.bodyLarge,
-        ),
-      );
-    }
+    return _buildSearchResults(suggestions);
+  }
 
+  Widget _buildSearchResults(List<ShoppingList> results) {
     return ListView.builder(
-      itemCount: suggestions.length,
+      itemCount: results.length,
       itemBuilder: (context, index) {
-        final list = suggestions[index];
+        final list = results[index];
         return ListTile(
-          title: Text(list['title']),
+          title: Text(list.title),
+          subtitle: Text('${list.items.length} items'),
           onTap: () {
-            query = list['title'];
-            showResults(context);
+            onListTap(list);
+            close(context, null);
           },
         );
       },
